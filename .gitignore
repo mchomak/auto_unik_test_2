@@ -1,0 +1,31 @@
+# Environment
+.env
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Chrome profile
+chrome_profile/
+
+# Cookies
+cookies.pkl
+
+# Logs (keep directory, ignore files)
+logs/*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
