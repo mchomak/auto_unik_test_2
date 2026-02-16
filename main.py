@@ -1,7 +1,6 @@
 """Точка входа — запуск автоматического прохождения тестов."""
 
 import sys
-from urllib.parse import urlparse
 
 import config
 from bot.auth import AuthManager
@@ -9,19 +8,6 @@ from bot.browser import BrowserManager
 from bot.test_solver import TestSolver
 
 logger = config.setup_logging()
-
-
-def _extract_base_url(url: str) -> str:
-    """Извлечь базовый URL (scheme + netloc) из полного URL.
-
-    Args:
-        url: Полный URL.
-
-    Returns:
-        Базовый URL вида https://example.com.
-    """
-    parsed = urlparse(url)
-    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def main() -> None:
@@ -44,11 +30,11 @@ def main() -> None:
     try:
         driver = browser.start()
 
-        # Авторизация — используем домен первого теста
-        base_url = _extract_base_url(config.TEST_URLS[0])
+        # Авторизация — проверяем на реальном URL теста,
+        # чтобы убедиться, что сессия действительно валидна
         auth = AuthManager(driver)
 
-        if not auth.ensure_logged_in(base_url):
+        if not auth.ensure_logged_in(config.TEST_URLS[0]):
             logger.error("Авторизация не удалась — завершаю работу")
             sys.exit(1)
 

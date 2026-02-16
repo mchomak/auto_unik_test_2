@@ -34,22 +34,29 @@ class AuthManager:
 
     # ── публичный API ─────────────────────────────────────────────────
 
-    def ensure_logged_in(self, base_url: str) -> bool:
+    def ensure_logged_in(self, check_url: str) -> bool:
         """Убедиться, что пользователь авторизован.
 
-        Сначала пробует загрузить cookies, затем — ручной логин.
+        Загружает cookies (если есть), затем переходит на check_url
+        и проверяет, не появилась ли форма логина. Если cookies
+        невалидны — выполняет автоматический логин.
 
         Args:
-            base_url: Базовый URL платформы (для загрузки cookies в домен).
+            check_url: URL, требующий авторизации (реальная страница теста).
+                       Используется и для привязки cookies к домену,
+                       и для проверки валидности сессии.
 
         Returns:
             True, если авторизация успешна.
         """
-        # Открыть базовый URL, чтобы cookies привязались к домену
-        self.driver.get(base_url)
+        # Открыть URL, чтобы cookies привязались к домену
+        self.driver.get(check_url)
 
         if self._load_cookies():
-            self.driver.refresh()
+            # Перейти на целевую страницу — именно она покажет,
+            # валидна ли сессия (сервер может редиректнуть на логин)
+            self.driver.get(check_url)
+
             if self._is_logged_in():
                 logger.info("Авторизация через cookies успешна")
                 return True
@@ -99,12 +106,19 @@ class AuthManager:
     def _is_logged_in(self) -> bool:
         """Проверить, авторизован ли пользователь.
 
-        Эвристика: если на странице нет формы логина — считаем, что
-        пользователь авторизован.
+        Комбинированная эвристика:
+        1. Если URL содержит login/auth — сервер перенаправил на логин.
+        2. Если на странице есть форма с полем пароля — не авторизован.
 
         Returns:
             True, если пользователь авторизован.
         """
+        current_url = self.driver.current_url.lower()
+        login_indicators = ("login", "/auth", "signin", "sign-in", "logon")
+        if any(indicator in current_url for indicator in login_indicators):
+            logger.debug("URL содержит признак страницы логина: %s", current_url)
+            return False
+
         try:
             self.driver.find_element(By.CSS_SELECTOR, "input[type='password']")
             return False  # Форма логина видна → не авторизован

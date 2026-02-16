@@ -68,14 +68,26 @@ class BrowserManager:
     # ── приватные методы ──────────────────────────────────────────────
 
     def _validate_extension_path(self) -> None:
-        """Проверить, что путь к расширению существует."""
+        """Проверить, что путь к расширению существует и содержит manifest.json."""
         ext_path = Path(config.EXTENSION_PATH)
         if not ext_path.exists():
             raise FileNotFoundError(
-                f"Путь к расширению не найден: {config.EXTENSION_PATH}. "
+                f"Путь к расширению не найден: {config.EXTENSION_PATH}\n"
                 f"Убедитесь, что расширение SyncShare распаковано по указанному пути."
             )
-        logger.debug("Расширение найдено: %s", config.EXTENSION_PATH)
+
+        manifest = ext_path / "manifest.json"
+        if not manifest.exists():
+            raise FileNotFoundError(
+                f"Файл manifest.json не найден в {config.EXTENSION_PATH}\n"
+                f"Убедитесь, что путь указывает на корневую папку расширения, "
+                f"содержащую manifest.json.\n"
+                f"ВАЖНО: скопируйте папку расширения из Chrome в отдельное место, "
+                f"например C:\\Users\\<User>\\syncshare_extension — "
+                f"Chrome блокирует загрузку из системной папки Extensions."
+            )
+
+        logger.info("Расширение найдено: %s (manifest.json ✓)", config.EXTENSION_PATH)
 
     def _build_options(self) -> Options:
         """Собрать ChromeOptions для запуска браузера.
