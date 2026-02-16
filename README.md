@@ -71,6 +71,23 @@ cp .env.example .env
 
 ## Запуск
 
+### Ручная авторизация (первый раз)
+
+Если автоматический логин не подходит (капча, 2FA, SSO), сначала сохраните cookies вручную:
+
+```bash
+python save_cookies.py
+```
+
+Скрипт откроет браузер — войдите в систему вручную, затем нажмите Enter в терминале. Cookies будут сохранены в `cookies.pkl` и использованы при следующих запусках `main.py`.
+
+Можно передать URL явно:
+```bash
+python save_cookies.py https://lms.example.com/login
+```
+
+### Прохождение тестов
+
 ```bash
 python main.py
 ```
@@ -84,7 +101,8 @@ test_automation/
 ├── README.md
 ├── requirements.txt
 ├── config.py             # Загрузка конфигурации из .env
-├── main.py               # Точка входа
+├── main.py               # Точка входа — прохождение тестов
+├── save_cookies.py       # Ручная авторизация и сохранение cookies
 ├── bot/
 │   ├── __init__.py
 │   ├── browser.py        # Инициализация браузера с расширением
