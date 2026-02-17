@@ -47,6 +47,7 @@ class BrowserManager:
             self._driver = webdriver.Chrome(service=service, options=options)
             self._driver.implicitly_wait(config.WAIT_TIMEOUT)
             logger.info("Браузер Chrome запущен успешно")
+            self._install_extension()
             self._verify_extension_loaded()
             return self._driver
         except Exception as exc:
@@ -169,6 +170,28 @@ class BrowserManager:
         except Exception:
             logger.warning("Не удалось обновить manifest.json", exc_info=True)
 
+    def _install_extension(self) -> None:
+        """Установить расширение SyncShare через WebDriver BiDi API.
+
+        Google Chrome 137+ заблокировал флаг --load-extension.
+        BiDi webextension API — рекомендуемая замена.
+        См. https://github.com/SeleniumHQ/selenium/issues/15788
+        """
+        ext_path = os.path.abspath(config.EXTENSION_PATH)
+        try:
+            self._driver.webextension.install(path=ext_path)
+            logger.info("Расширение установлено через BiDi API")
+        except AttributeError:
+            logger.error(
+                "BiDi webextension API недоступен. "
+                "Обновите Selenium: pip install -U 'selenium>=4.34.2'"
+            )
+        except Exception:
+            logger.error(
+                "Не удалось установить расширение через BiDi API",
+                exc_info=True,
+            )
+
     def _verify_extension_loaded(self) -> None:
         """Проверить, что расширение реально загрузилось в Chrome.
 
@@ -261,19 +284,20 @@ class BrowserManager:
         """
         options = Options()
 
-        # ВАЖНО: ChromeDriver по умолчанию добавляет --disable-extensions,
-        # что молча блокирует все расширения. Убираем этот флаг.
+        # BiDi API для установки расширений.
+        # Google Chrome 137+ заблокировал --load-extension,
+        # а в Chrome 142+ убрали и обходной путь через --disable-features.
+        # BiDi webextension.install() — единственный рабочий способ.
+        options.enable_bidi = True
+        options.enable_webextensions = True
+
+        # ChromeDriver по умолчанию добавляет --disable-extensions,
+        # что блокирует расширения. Убираем.
         options.add_experimental_option("excludeSwitches", [
             "enable-automation",
             "disable-extensions",
         ])
 
-        # Расширение (на Windows заменяем \ на / для совместимости с Chrome)
-        ext_abs_path = os.path.abspath(config.EXTENSION_PATH).replace("\\", "/")
-        options.add_argument(f"--load-extension={ext_abs_path}")
-        logger.info("Загрузка расширения: --load-extension=%s", ext_abs_path)
-
-        # Явно разрешаем расширения
         options.add_argument("--enable-extensions")
 
         # Persistent профиль — сохраняет cookies и данные расширения
