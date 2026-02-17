@@ -170,31 +170,77 @@ class BrowserManager:
             logger.warning("Не удалось обновить manifest.json", exc_info=True)
 
     def _verify_extension_loaded(self) -> None:
-        """Проверить, что расширение реально загрузилось в Chrome."""
+        """Проверить, что расширение реально загрузилось в Chrome.
+
+        Используется два метода:
+        1. CDP Target.getTargets — ищет targets с URL chrome-extension://,
+           не зависит от версии Chrome.
+        2. Запасной: chrome://extensions/ с рекурсивным обходом shadow DOM
+           (структура страницы меняется между версиями Chrome).
+        """
+        import time
+
         try:
+            time.sleep(3)  # Даём расширению время инициализироваться
+
+            # ── Метод 1: CDP ──────────────────────────────────────────
+            try:
+                targets = self._driver.execute_cdp_cmd(
+                    "Target.getTargets", {}
+                )
+                ext_targets = [
+                    t
+                    for t in targets.get("targetInfos", [])
+                    if t.get("url", "").startswith("chrome-extension://")
+                ]
+                if ext_targets:
+                    ext_ids = {
+                        t["url"].split("/")[2]
+                        for t in ext_targets
+                        if len(t.get("url", "").split("/")) > 2
+                    }
+                    logger.info(
+                        "Расширений загружено в Chrome: %d", len(ext_ids)
+                    )
+                    return
+            except Exception:
+                logger.debug(
+                    "CDP Target.getTargets недоступен", exc_info=True
+                )
+
+            # ── Метод 2: chrome://extensions/ + JS ────────────────────
+            # Service worker расширения MV3 мог не создать target —
+            # проверяем через UI страницы расширений.
             self._driver.get("chrome://extensions/")
-            # Дождаться загрузки страницы
-            import time
             time.sleep(2)
 
-            # extensions-manager содержит все расширения в shadow DOM
-            ext_manager = self._driver.find_element(
-                by="tag name", value="extensions-manager"
-            )
-            shadow = self._driver.execute_script(
-                "return arguments[0].shadowRoot", ext_manager
-            )
-            items_list = shadow.find_element(by="id", value="items-list")
-            shadow2 = self._driver.execute_script(
-                "return arguments[0].shadowRoot", items_list
+            ext_count = self._driver.execute_script(
+                """
+                try {
+                    const mgr = document.querySelector('extensions-manager');
+                    if (!mgr || !mgr.shadowRoot) return 0;
+                    // Рекурсивный поиск extensions-item во вложенных shadow root
+                    function search(root, depth) {
+                        if (depth > 4) return 0;
+                        const items = root.querySelectorAll('extensions-item');
+                        if (items.length > 0) return items.length;
+                        for (const el of root.querySelectorAll('*')) {
+                            if (el.shadowRoot) {
+                                const n = search(el.shadowRoot, depth + 1);
+                                if (n > 0) return n;
+                            }
+                        }
+                        return 0;
+                    }
+                    return search(mgr.shadowRoot, 0);
+                } catch (e) { return 0; }
+                """
             )
 
-            # Считаем расширения (extensions-item)
-            extensions = shadow2.find_elements(by="css selector", value="extensions-item")
-            ext_count = len(extensions)
-
-            if ext_count > 0:
-                logger.info("Расширений загружено в Chrome: %d", ext_count)
+            if ext_count and ext_count > 0:
+                logger.info(
+                    "Расширений загружено в Chrome: %d", ext_count
+                )
             else:
                 logger.error(
                     "Расширение НЕ загрузилось! Проверьте:\n"
@@ -203,8 +249,9 @@ class BrowserManager:
                     "  3. Закройте все окна Chrome перед запуском"
                 )
         except Exception:
-            logger.debug("Не удалось проверить расширения через chrome://extensions",
-                         exc_info=True)
+            logger.debug(
+                "Не удалось проверить расширения", exc_info=True
+            )
 
     def _build_options(self) -> Options:
         """Собрать ChromeOptions для запуска браузера.
