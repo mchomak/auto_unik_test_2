@@ -1,0 +1,33 @@
+#popup {
+    width: 300px; /* 340px */
+    height: 450px /* 470px */;
+}
+
+#container {
+    width: 290px;
+}
+
+#save-settings {
+    width: 100%;
+}
+
+i.icon-active {
+    color: #26b916;
+}
+
+i.icon-inactive {
+    color: #bf4eef;
+}
+
+#logo {
+    width: 45%;
+}
+
+.text-icon {
+    font-size: 14px;
+    vertical-align: baseline;
+}
+
+.hidden {
+    visibility: hidden;
+}

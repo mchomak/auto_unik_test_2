@@ -1,0 +1,96 @@
+{
+   "action": {
+      "default_icon": {
+         "128": "icons/logo@128.png",
+         "16": "icons/logo@16.png",
+         "24": "icons/logo@24.png",
+         "32": "icons/logo@32.png",
+         "64": "icons/logo@64.png"
+      },
+      "default_popup": "html/popup/popup.html",
+      "default_title": "SyncShare"
+   },
+   "author": "Naloaty <syncshare.ext@gmail.com>",
+   "background": {
+      "service_worker": "js/background.js"
+   },
+   "content_scripts": [
+      {
+         "css": [
+            "css/widgets/context_menu.css"
+         ],
+         "include_globs": [
+            "*mod/quiz/attempt.php*",
+            "*mod/quiz/review.php*"
+         ],
+         "js": [
+            "js/commons.js",
+            "js/quiz_attempt.js"
+         ],
+         "matches": [
+            "*://*/*"
+         ],
+         "run_at": "document_idle"
+      },
+      {
+         "include_globs": [
+            "*mod/quiz/summary.php*"
+         ],
+         "js": [
+            "js/commons.js",
+            "js/quiz_overview.js"
+         ],
+         "matches": [
+            "*://*/*"
+         ],
+         "run_at": "document_idle"
+      },
+      {
+         "include_globs": [
+            "*mod/quiz/view.php*"
+         ],
+         "js": [
+            "js/commons.js",
+            "js/quiz_board.js"
+         ],
+         "matches": [
+            "*://*/*"
+         ],
+         "run_at": "document_idle"
+      }
+   ],
+   "content_security_policy": {
+      "extension_pages": "default-src 'self'; img-src data:; connect-src 'self' https://syncshare.ru/api/ https:;"
+   },
+   "default_locale": "en",
+   "description": "__MSG_extensionDescription__",
+   "homepage_url": "https://syncshare.ru/",
+   "host_permissions": [
+      "*://*/*"
+   ],
+   "icons": {
+      "128": "icons/logo@128.png",
+      "16": "icons/logo@16.png",
+      "24": "icons/logo@24.png",
+      "32": "icons/logo@32.png",
+      "64": "icons/logo@64.png"
+   },
+   "manifest_version": 3,
+   "name": "SyncShare",
+   "permissions": [
+      "storage",
+      "contextMenus"
+   ],
+   "version": "2.11.0",
+   "web_accessible_resources": [
+      {
+         "matches": [
+            "<all_urls>"
+         ],
+         "resources": [
+            "css/widgets/context_menu.css"
+         ],
+         "use_dynamic_url": true
+      }
+   ]
+}
