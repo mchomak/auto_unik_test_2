@@ -44,10 +44,21 @@ class TestSolver:
 
     # ── публичный API ─────────────────────────────────────────────────
 
-    def solve(self, test_url: str) -> None:
-        """Пройти один тест от начала до конца."""
-        logger.info("Открываю тест: %s", test_url)
-        self.driver.get(test_url)
+    def solve(self, test_url: str, *, new_tab: bool = False) -> None:
+        """Пройти один тест от начала до конца.
+
+        Args:
+            test_url: URL страницы теста.
+            new_tab: Если True — открыть тест в новой вкладке,
+                     предыдущую оставить как есть.
+        """
+        if new_tab:
+            self.driver.execute_script("window.open(arguments[0]);", test_url)
+            self.driver.switch_to.window(self.driver.window_handles[-1])
+            logger.info("Открываю тест в новой вкладке: %s", test_url)
+        else:
+            logger.info("Открываю тест: %s", test_url)
+            self.driver.get(test_url)
 
         if not self._click_start_button():
             logger.error("Не удалось начать тест — кнопка старта не найдена")
@@ -135,10 +146,10 @@ class TestSolver:
 
         if is_finish and config.TEST_MODE:
             logger.info(
-                "ТЕСТОВЫЙ РЕЖИМ: обнаружена кнопка «%s» — браузер остаётся открытым",
+                "ТЕСТОВЫЙ РЕЖИМ: кнопка «%s» найдена — тест НЕ завершаем, "
+                "вкладка остаётся открытой",
                 button_text,
             )
-            input("Нажмите Enter для продолжения...")
             return True
 
         next_btn.click()
