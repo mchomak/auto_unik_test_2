@@ -108,6 +108,7 @@ class BrowserManager:
         # - browser_style: Firefox-специфичное свойство, Chrome может выдать
         #   предупреждение/ошибку при его наличии.
         self._sanitize_manifest(manifest)
+        self._patch_shadow_mode(ext_path)
 
         logger.info("Расширение найдено: %s (manifest.json ✓)", config.EXTENSION_PATH)
 
@@ -169,6 +170,28 @@ class BrowserManager:
             )
         except Exception:
             logger.warning("Не удалось обновить manifest.json", exc_info=True)
+
+    @staticmethod
+    def _patch_shadow_mode(ext_path: Path) -> None:
+        """Переключить shadow DOM расширения из closed в open.
+
+        Расширение SyncShare оборачивает кнопки и контекстное меню
+        в closed shadow DOM, что делает их невидимыми для Selenium.
+        Замена mode:"closed" → mode:"open" позволяет автоматизации
+        находить и кликать элементы расширения.
+        """
+        commons = ext_path / "js" / "commons.js"
+        if not commons.exists():
+            return
+
+        try:
+            text = commons.read_text(encoding="utf-8")
+            patched = text.replace('mode:"closed"', 'mode:"open"')
+            if patched != text:
+                commons.write_text(patched, encoding="utf-8")
+                logger.info("Shadow DOM расширения: closed → open")
+        except Exception:
+            logger.warning("Не удалось пропатчить shadow DOM", exc_info=True)
 
     def _install_extension(self) -> None:
         """Установить расширение SyncShare через WebDriver BiDi API.
