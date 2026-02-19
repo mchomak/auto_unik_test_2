@@ -1,6 +1,7 @@
 """Точка входа — запуск автоматического прохождения тестов."""
 
 import sys
+import time
 
 import config
 from bot.auth import AuthManager
@@ -8,6 +9,25 @@ from bot.browser import BrowserManager
 from bot.test_solver import TestSolver
 
 logger = config.setup_logging()
+
+
+def _wait_for_browser_close(browser: BrowserManager) -> None:
+    """Ждать, пока пользователь сам закроет браузер."""
+    logger.info(
+        "ТЕСТОВЫЙ РЕЖИМ: все тесты обработаны. "
+        "Закройте браузер, чтобы завершить программу."
+    )
+    try:
+        while True:
+            try:
+                # Простая проверка — если браузер закрыт, title вызовет ошибку
+                _ = browser.driver.title
+            except Exception:
+                logger.info("Браузер закрыт пользователем")
+                break
+            time.sleep(2)
+    except KeyboardInterrupt:
+        logger.info("Прервано пользователем (Ctrl+C)")
 
 
 def main() -> None:
@@ -47,7 +67,9 @@ def main() -> None:
             logger.info("─" * 60)
 
             try:
-                solver.solve(test_url)
+                # В тестовом режиме: первый тест — в текущей вкладке,
+                # последующие — в новых (предыдущие остаются открытыми).
+                solver.solve(test_url, new_tab=(config.TEST_MODE and idx > 1))
             except KeyboardInterrupt:
                 logger.info("Прервано пользователем (Ctrl+C)")
                 break
@@ -57,6 +79,10 @@ def main() -> None:
 
         logger.info("Все тесты обработаны")
 
+        # В тестовом режиме ждём, пока пользователь закроет браузер
+        if config.TEST_MODE:
+            _wait_for_browser_close(browser)
+
     except KeyboardInterrupt:
         logger.info("Прервано пользователем (Ctrl+C)")
     except Exception:
@@ -65,8 +91,6 @@ def main() -> None:
     finally:
         if driver and not config.TEST_MODE:
             browser.quit()
-        elif config.TEST_MODE:
-            logger.info("ТЕСТОВЫЙ РЕЖИМ: браузер остаётся открытым")
 
     logger.info("Программа завершена")
 
