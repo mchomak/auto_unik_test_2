@@ -223,11 +223,14 @@ class AuthManager:
             return True
 
     def _perform_login(self, return_url: str | None = None) -> bool:
-        """Fill and submit the Moodle login form.
+        """Fill and submit the Moodle login form or click SSO button.
 
         Expects the browser to already be on the login page.
-        After a successful login Moodle redirects to the dashboard;
-        if return_url is provided, we navigate there explicitly.
+        Detects quickly whether the page has a username/password form
+        or only an SSO button.  If SSO-only, clicks the SSO button and
+        waits for the external IdP to authenticate (requires valid saved
+        cookies from save_cookies.py — without them the user must log in
+        manually in the browser window that opens).
 
         Args:
             return_url: URL to navigate to after a successful login.
@@ -237,12 +240,30 @@ class AuthManager:
         """
         logger.info("Starting form login | url: %s", self.driver.current_url)
 
+        # Quick check (3 s) for a username field.  SSO-only pages won't have one.
+        quick_wait = WebDriverWait(self.driver, 3)
+        has_form = True
         try:
-            login_field = self.wait.until(
+            quick_wait.until(
                 EC.presence_of_element_located((
                     By.CSS_SELECTOR,
-                    "input[type='text'], input[type='email'], input[name='username']",
+                    "input[name='username'], input[type='email']",
                 ))
+            )
+        except TimeoutException:
+            has_form = False
+
+        if not has_form:
+            logger.info(
+                "No username/password form on login page — "
+                "trying SSO button (mospolytech IdP)"
+            )
+            return self._perform_sso_login(return_url)
+
+        try:
+            login_field = self.driver.find_element(
+                By.CSS_SELECTOR,
+                "input[name='username'], input[type='email']",
             )
             login_field.clear()
             login_field.send_keys(config.LOGIN)
@@ -303,6 +324,89 @@ class AuthManager:
         except Exception:
             logger.exception(
                 "Unexpected login error | url: %s", self.driver.current_url
+            )
+            return False
+
+    def _perform_sso_login(self, return_url: str | None = None) -> bool:
+        """Click the SSO button and wait for authentication via external IdP.
+
+        lms.mospolytech.ru uses an external SSO provider (Keycloak / SAML2).
+        The Moodle login page shows only an SSO button — no username/password
+        fields.  This method clicks that button, then waits up to 120 seconds
+        for the browser to land on an authenticated Moodle page.
+
+        If no SSO button is found, or authentication does not succeed within
+        the timeout, the user is instructed to run save_cookies.py to
+        manually refresh their session cookies.
+
+        Args:
+            return_url: URL to navigate to after a successful login.
+
+        Returns:
+            True if SSO login succeeded.
+        """
+        sso_selectors = [
+            # Moodle auth_saml2 / Keycloak typical button labels
+            "//a[contains(@href, 'saml2') or contains(@href, 'sso') "
+            "or contains(@href, 'oauth2') or contains(@href, 'oidc')]",
+            "//button[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ',"
+            "'abcdefghijklmnopqrstuvwxyz'),'войти через')]",
+            "//a[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ',"
+            "'abcdefghijklmnopqrstuvwxyz'),'войти через')]",
+            "//button[contains(@class,'btn-secondary') or contains(@class,'sso')]",
+            "//a[contains(@class,'btn-secondary') or contains(@class,'sso')]",
+        ]
+
+        sso_btn = None
+        for xpath in sso_selectors:
+            try:
+                sso_btn = self.driver.find_element(By.XPATH, xpath)
+                logger.info("SSO button found: %s", sso_btn.text or sso_btn.get_attribute("href"))
+                break
+            except NoSuchElementException:
+                continue
+
+        if sso_btn is None:
+            logger.error(
+                "SSO button not found and no username/password form present.\n"
+                "  → Сохранённые cookies устарели или файл cookies не существует.\n"
+                "  → Запустите save_cookies.py, войдите вручную и повторите запуск бота."
+            )
+            return False
+
+        try:
+            sso_btn.click()
+            logger.info("SSO button clicked — waiting for authentication (up to 120 s)…")
+
+            # Wait until we land on an authenticated Moodle page
+            sso_wait = WebDriverWait(self.driver, 120)
+            sso_wait.until(lambda d: self._is_logged_in())
+
+            logger.info(
+                "SSO login: SUCCESS | final url: %s", self.driver.current_url
+            )
+
+            if return_url:
+                self._navigate_safe(return_url)
+                logger.info(
+                    "Navigated to target after SSO | url: %s",
+                    self.driver.current_url,
+                )
+
+            self._save_cookies()
+            return True
+
+        except TimeoutException:
+            logger.error(
+                "SSO login timed out (120 s) — not authenticated.\n"
+                "  → Запустите save_cookies.py, войдите вручную и повторите запуск бота.\n"
+                "  → final url: %s",
+                self.driver.current_url,
+            )
+            return False
+        except Exception:
+            logger.exception(
+                "Unexpected SSO login error | url: %s", self.driver.current_url
             )
             return False
 
