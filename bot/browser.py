@@ -193,6 +193,8 @@ class BrowserManager:
         except Exception:
             logger.warning("Не удалось пропатчить shadow DOM", exc_info=True)
 
+
+
     def _install_extension(self) -> None:
         """Установить расширение SyncShare через WebDriver BiDi API.
 
