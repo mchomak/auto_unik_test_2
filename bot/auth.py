@@ -238,7 +238,21 @@ class AuthManager:
         Returns:
             True if login succeeded.
         """
-        logger.info("Starting form login | url: %s", self.driver.current_url)
+        current = self.driver.current_url
+        logger.info("Starting form login | url: %s", current)
+
+        # After navigating to /login/index.php, Moodle may have redirected
+        # us to an external SSO provider (Keycloak, ADFS, etc.).
+        # Detect this: if we're no longer on the Moodle login page path.
+        on_sso_provider = _MOODLE_LOGIN_PATH not in current
+
+        if on_sso_provider:
+            logger.info(
+                "Redirected away from Moodle login to: %s — "
+                "this is an external SSO provider page",
+                current,
+            )
+            return self._perform_sso_provider_login(return_url)
 
         # Quick check (3 s) for a username field.  SSO-only pages won't have one.
         quick_wait = WebDriverWait(self.driver, 3)
@@ -324,6 +338,149 @@ class AuthManager:
         except Exception:
             logger.exception(
                 "Unexpected login error | url: %s", self.driver.current_url
+            )
+            return False
+
+    def _perform_sso_provider_login(self, return_url: str | None = None) -> bool:
+        """Handle login on an external SSO provider page (Keycloak, ADFS, etc.).
+
+        When Moodle's /login/index.php redirects to an external IdP,
+        we land on that provider's login form. This method fills in
+        username/password on the SSO provider's page and submits.
+        """
+        current = self.driver.current_url
+        logger.info("SSO provider login | url: %s", current)
+
+        # Log page source snippet for debugging
+        try:
+            title = self.driver.title
+            logger.info("SSO page title: %s", title)
+        except Exception:
+            pass
+
+        # Wait up to 10 s for any login form on the SSO provider page
+        sso_wait = WebDriverWait(self.driver, 10)
+        try:
+            sso_wait.until(
+                EC.presence_of_element_located((
+                    By.CSS_SELECTOR,
+                    "input[name='username'], input[name='login'], "
+                    "input[type='email'], input[id='username'], "
+                    "input[id='login-username'], input[name='UserName']",
+                ))
+            )
+        except TimeoutException:
+            logger.error(
+                "No login form found on SSO provider page: %s\n"
+                "  → Запустите save_cookies.py, войдите вручную и повторите запуск бота.",
+                current,
+            )
+            return False
+
+        # Find username field (try multiple common SSO form field names)
+        login_field = None
+        for sel in [
+            "input[name='username']", "input[name='login']",
+            "input[type='email']", "input[id='username']",
+            "input[id='login-username']", "input[name='UserName']",
+        ]:
+            try:
+                login_field = self.driver.find_element(By.CSS_SELECTOR, sel)
+                logger.info("SSO username field found: %s", sel)
+                break
+            except NoSuchElementException:
+                continue
+
+        if not login_field:
+            logger.error("SSO username field not found on %s", current)
+            return False
+
+        login_field.clear()
+        login_field.send_keys(config.LOGIN)
+        logger.debug("SSO: username entered")
+
+        # Find password field
+        try:
+            password_field = self.driver.find_element(
+                By.CSS_SELECTOR, "input[type='password']"
+            )
+            password_field.clear()
+            password_field.send_keys(config.PASSWORD)
+            logger.debug("SSO: password entered")
+        except NoSuchElementException:
+            # Some SSO providers have a two-step flow: username first, then password
+            logger.info("No password field yet — submitting username first")
+            try:
+                submit = self.driver.find_element(
+                    By.CSS_SELECTOR,
+                    "button[type='submit'], input[type='submit']",
+                )
+                submit.click()
+                logger.debug("SSO: username submitted, waiting for password field")
+                sso_wait.until(
+                    EC.presence_of_element_located((
+                        By.CSS_SELECTOR, "input[type='password']",
+                    ))
+                )
+                password_field = self.driver.find_element(
+                    By.CSS_SELECTOR, "input[type='password']"
+                )
+                password_field.clear()
+                password_field.send_keys(config.PASSWORD)
+                logger.debug("SSO: password entered (step 2)")
+            except (NoSuchElementException, TimeoutException):
+                logger.error(
+                    "SSO: could not complete two-step login on %s",
+                    self.driver.current_url,
+                )
+                return False
+
+        # Submit the SSO form
+        try:
+            submit = self.driver.find_element(
+                By.CSS_SELECTOR,
+                "button[type='submit'], input[type='submit']",
+            )
+            url_before = self.driver.current_url
+            submit.click()
+            logger.info("SSO: submit clicked | was at: %s", url_before)
+        except NoSuchElementException:
+            # Try pressing Enter on the password field
+            from selenium.webdriver.common.keys import Keys
+            password_field.send_keys(Keys.RETURN)
+            logger.info("SSO: submitted via Enter key")
+
+        # Wait for redirect back to Moodle (up to 30 s)
+        redirect_wait = WebDriverWait(self.driver, 30)
+        try:
+            redirect_wait.until(
+                lambda d: self._is_logged_in()
+            )
+            logger.info(
+                "SSO provider login: SUCCESS | final url: %s",
+                self.driver.current_url,
+            )
+
+            if return_url:
+                self._navigate_safe(return_url)
+                logger.info(
+                    "Navigated to target after SSO provider login | url: %s",
+                    self.driver.current_url,
+                )
+
+            self._save_cookies()
+            return True
+
+        except TimeoutException:
+            logger.error(
+                "SSO provider login: FAILED — not redirected back to Moodle "
+                "within 30 s.\n"
+                "  → final url: %s\n"
+                "  → title: %s\n"
+                "  → Проверьте LOGIN и PASSWORD в config, или запустите "
+                "save_cookies.py для ручного входа.",
+                self.driver.current_url,
+                self.driver.title,
             )
             return False
 
