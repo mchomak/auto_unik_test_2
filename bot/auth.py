@@ -50,8 +50,9 @@ class AuthManager:
            second navigation.
         2. Clear all existing cookies, then load saved cookies.
         3. Navigate to check_url once, with a clean cookie jar.
-        4. If a redirect loop still occurs, catch it and fall back to a
-           direct form login (bypassing SSO redirect entirely).
+        4. If cookies are stale, fall back to a fresh login.  Navigate to
+           check_url again (not /login/index.php directly) to let Moodle's
+           wantsurl flow redirect us to the login/SSO page without looping.
 
         Args:
             check_url: A protected URL that requires authentication.
@@ -86,9 +87,17 @@ class AuthManager:
             # Wipe everything before attempting a fresh login
             self.driver.delete_all_cookies()
 
-        # Step 3: go directly to Moodle's login page — no SSO redirect chain
-        self._navigate_safe(login_url)
-        logger.debug("Login page loaded | url: %s", self.driver.current_url)
+        # Step 3: navigate to check_url (not login_url directly).
+        #
+        # Going directly to /login/index.php can cause ERR_TOO_MANY_REDIRECTS
+        # when the SSO configuration redirects /login/index.php → SSO → back
+        # to /login/index.php in a loop.  Navigating to check_url goes through
+        # Moodle's normal wantsurl flow, which correctly sets up the SSO
+        # context and then lands on the login page / SSO provider without
+        # looping.  (We already observed check_url redirecting cleanly to
+        # /login/index.php with stale cookies a few lines above.)
+        self._navigate_safe(check_url)
+        logger.debug("After redirect | url: %s", self.driver.current_url)
 
         return self._perform_login(return_url=check_url)
 
@@ -97,8 +106,15 @@ class AuthManager:
     def _navigate_safe(self, url: str) -> bool:
         """Navigate to url, recovering from ERR_TOO_MANY_REDIRECTS.
 
-        If a redirect loop is detected, all cookies are cleared and
-        navigation is retried once from scratch.
+        ChromeDriver does NOT raise an exception for redirect loops — it
+        renders the chrome-error:// page and returns normally. We therefore
+        detect the condition by inspecting the resulting URL/title in
+        addition to catching WebDriverException (which some driver versions
+        do raise).
+
+        If a redirect loop is detected, all cookies and browser storage are
+        cleared, the browser is reset to about:blank, and navigation is
+        retried once.
 
         Args:
             url: Target URL.
@@ -106,26 +122,63 @@ class AuthManager:
         Returns:
             True if navigation completed without a redirect-loop error.
         """
-        try:
-            self.driver.get(url)
-            return True
-        except WebDriverException as exc:
-            err = str(exc)
-            if "ERR_TOO_MANY_REDIRECTS" in err or "too many redirects" in err.lower():
-                logger.warning(
-                    "ERR_TOO_MANY_REDIRECTS on %s — "
-                    "clearing cookies and retrying once",
-                    url,
-                )
-                try:
-                    self.driver.delete_all_cookies()
-                    self.driver.get(url)
+        def _is_redirect_loop() -> bool:
+            try:
+                cur = self.driver.current_url or ""
+                if cur.startswith("chrome-error://"):
                     return True
-                except WebDriverException:
+                title = self.driver.title or ""
+                if "ERR_TOO_MANY_REDIRECTS" in title or "ERR_TOO_MANY_REDIRECTS" in cur:
+                    return True
+                src = self.driver.page_source or ""
+                if "ERR_TOO_MANY_REDIRECTS" in src:
+                    return True
+            except Exception:
+                pass
+            return False
+
+        def _recover_and_retry() -> bool:
+            logger.warning(
+                "ERR_TOO_MANY_REDIRECTS on %s — "
+                "clearing cookies/storage and retrying once",
+                url,
+            )
+            try:
+                self.driver.delete_all_cookies()
+            except Exception:
+                pass
+            try:
+                # Reset to a neutral page to clear Chrome's internal redirect
+                # cache before the retry.
+                self.driver.get("about:blank")
+                try:
+                    self.driver.execute_script(
+                        "window.localStorage.clear(); window.sessionStorage.clear();"
+                    )
+                except Exception:
+                    pass
+                self.driver.get(url)
+                if _is_redirect_loop():
                     logger.error(
                         "Redirect loop persists after cookie clear for %s", url
                     )
                     return False
+                return True
+            except WebDriverException:
+                logger.error(
+                    "Redirect loop persists after cookie clear for %s", url
+                )
+                return False
+
+        try:
+            self.driver.get(url)
+            if _is_redirect_loop():
+                return _recover_and_retry()
+            return True
+        except WebDriverException as exc:
+            err = str(exc)
+            if "ERR_TOO_MANY_REDIRECTS" in err or "too many redirects" in err.lower():
+                return _recover_and_retry()
             raise
 
     def _load_cookies(self) -> bool:
