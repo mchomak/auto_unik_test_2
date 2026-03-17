@@ -4,11 +4,13 @@ import sys
 import time
 
 import config
-from bot.auth import AuthManager
 from bot.browser import BrowserManager
 from bot.test_solver import TestSolver
 
 logger = config.setup_logging()
+
+_LOGIN_URL = "https://lms.mospolytech.ru/"
+_LOGIN_WAIT = 60  # секунд на ручной вход
 
 
 def _wait_for_browser_close(browser: BrowserManager) -> None:
@@ -28,6 +30,25 @@ def _wait_for_browser_close(browser: BrowserManager) -> None:
             time.sleep(2)
     except KeyboardInterrupt:
         logger.info("Прервано пользователем (Ctrl+C)")
+
+
+def _manual_login(driver) -> None:
+    """Открыть главную страницу и дать время на ручной вход."""
+    logger.info("Открываю %s для ручной авторизации...", _LOGIN_URL)
+    driver.get(_LOGIN_URL)
+
+    print()
+    print("=" * 60)
+    print("  Войдите в систему вручную.")
+    print(f"  Автоматизация начнётся через {_LOGIN_WAIT} секунд.")
+    print("=" * 60)
+
+    for i in range(_LOGIN_WAIT, 0, -1):
+        print(f"\r  Осталось: {i} сек   ", end="", flush=True)
+        time.sleep(1)
+
+    print()
+    logger.info("Ожидание завершено. Начинаю прохождение тестов...")
 
 
 def main() -> None:
@@ -50,13 +71,8 @@ def main() -> None:
     try:
         driver = browser.start()
 
-        # Авторизация — проверяем на реальном URL теста,
-        # чтобы убедиться, что сессия действительно валидна
-        auth = AuthManager(driver)
-
-        if not auth.ensure_logged_in(config.TEST_URLS[0]):
-            logger.error("Авторизация не удалась — завершаю работу")
-            sys.exit(1)
+        # Ручная авторизация
+        _manual_login(driver)
 
         # Прохождение тестов
         solver = TestSolver(driver)
